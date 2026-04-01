@@ -108,4 +108,73 @@ python train_grid_world_obstacles.py run
 
 ## Uso do ambiente GridWorld para problemas de Coverage Path Planning
 
-**Sugestão**: considerando a última versão do ambiente GridWorld, com renderização e obstáculos, altere a função de *reward* e o que mais for necessário para que o agente aprenda a fazer *Coverage Path Planning* (CPP) em um ambiente 2D com obstáculos.
+*Coverage Path Planning* (CPP) é a tarefa de planejar um caminho que passe por todos os pontos livres de um ambiente, sem colidir com obstáculos.  Diferentemente da navegação ponto a ponto (chegar a um alvo específico), o critério de sucesso do CPP é a **cobertura total** do espaço livre.
+
+### Função de reward original (`grid_world_obstacles.py`)
+
+O ambiente de navegação com obstáculos utiliza uma função de reward baseada em **proximidade ao alvo**:
+
+| Evento | Reward |
+|--------|--------|
+| Agente alcança o alvo | +10.0 |
+| Episódio truncado (max\_steps excedido) | −10.0 |
+| Qualquer outro passo | `dist_anterior − dist_atual − 0.1` |
+
+O termo `dist_anterior − dist_atual` é *reward shaping* por distância: incentiva o agente a se aproximar do alvo a cada passo.  A penalidade de −0.1 por passo estimula eficiência.
+
+Essa função é adequada para **navegação**, mas inadequada para CPP porque:
+- Não há um único alvo — o objetivo é visitar *todas* as células livres.
+- O agente não recebe nenhum sinal por explorar áreas novas.
+
+### Nova função de reward para CPP (`gymnasium_env/grid_world_cpp.py`)
+
+Inspirada em dois trabalhos da literatura:
+
+- **Santos et al. (2023)** — *A Deep Reinforcement Learning Approach for the Patrolling Problem of Water Resources Through Autonomous Surface Vehicles: The Ypacarai Lake Case* — que utiliza ganho de informação como sinal de reward em tarefas de patrulha/cobertura.  
+- **Kiran et al. (2021)** — *A Comprehensive Survey on Coverage Path Planning for Mobile Robots in Dynamic Environments* — que descreve formulações padrão de reward para CPP, equilibrando completude (cobrir tudo) com eficiência (minimizar o comprimento do caminho).
+
+A nova função recompensa **ganho de cobertura**:
+
+| Evento | Reward |
+|--------|--------|
+| Agente entra em célula **nova** (não visitada) | +1.0 |
+| Agente revisita uma célula já coberta | 0.0 |
+| Custo de passo (todo passo) | −0.02 |
+| Bônus de conclusão (100 % das células cobertas) | +10.0 |
+| Penalidade de truncamento (max\_steps antes da cobertura total) | −5.0 |
+
+**Por que esta formulação?**
+
+- O reward por célula nova implementa a ideia de *information gain* de Santos et al.: o agente é incentivado proporcionalmente à área nova que descobre.
+- O custo de passo + bônus de conclusão seguem o padrão CPP do survey de Kiran et al.: o agente deve equilibrar *thoroughness* (cobrir tudo) com *efficiency* (caminho curto).
+- Não há penalidade por revisitar células (além do custo de passo), o que evita punir o agente quando o retrocesso é geometricamente inevitável — por exemplo, ao sair de um corredor com entrada única.
+
+**Mudanças no espaço de observação**
+
+Para que o agente possa planejar uma cobertura sistemática, a observação foi estendida para incluir um **mapa de cobertura** do grid:
+
+```
+obs[0:2]   — posição (x, y) do agente
+obs[2:]    — mapa de cobertura linearizado (row-major), onde:
+               0 = célula livre não visitada
+               1 = célula livre já visitada
+               2 = obstáculo
+```
+
+Dessa forma o agente tem visibilidade completa de quais células ainda precisam ser cobertas.
+
+### Executando o ambiente CPP com um agente aleatório
+
+Para testar o ambiente (sem renderização gráfica):
+
+```bash
+python run_grid_world_cpp.py
+```
+
+Para testar com a janela pygame (requer display):
+
+```bash
+python run_grid_world_cpp.py render
+```
+
+O script executa um episódio em um grid 5×5 com 3 obstáculos e imprime o progresso de cobertura passo a passo.  Por ser um agente aleatório, dificilmente atingirá 100 % de cobertura, mas permite verificar que o ambiente e a função de reward estão funcionando corretamente.
